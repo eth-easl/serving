@@ -171,8 +171,9 @@ func main() {
 	}()
 
 	// Setup probe to run for checking user-application healthiness.
-	probe := buildProbe(logger, env.ServingReadinessProbe)
-	healthState := health.NewState()
+	servingProbe := fmt.Sprintf("{\"tcpSocket\":{\"port\":%s,\"host\":\"%s\"},\"successThreshold\":1}", env.GuestAddr, env.GuestPort)
+	probe := buildProbe(logger, servingProbe)
+	healthState := &health.State{}
 
 	mainServer := buildServer(ctx, env, healthState, probe, stats, logger)
 	servers := map[string]*http.Server{
