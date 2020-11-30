@@ -34,8 +34,10 @@ import (
 	"go.uber.org/zap"
 
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	log "github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	network "knative.dev/networking/pkg"
 	pkglogging "knative.dev/pkg/logging"
 	"knative.dev/pkg/logging/logkey"
@@ -171,8 +173,22 @@ func main() {
 	}()
 
 	// Setup probe to run for checking user-application healthiness.
-	servingProbe := fmt.Sprintf("{\"tcpSocket\":{\"port\":%s,\"host\":\"%s\"},\"successThreshold\":1}", env.GuestAddr, env.GuestPort)
-	probe := buildProbe(logger, servingProbe)
+	servingProbe := &corev1.Probe{
+		SuccessThreshold: 1,
+		Handler: corev1.Handler{
+			TCPSocket: &corev1.TCPSocketAction{
+				Host: env.GuestAddr,
+				Port: intstr.FromString(env.GuestPort),
+			},
+		},
+	}
+
+	encodedProbe, err := readiness.EncodeProbe(servingProbe)
+	if err != nil {
+		logger.Fatalw("Failed to create stats reporter", zap.Error(err))
+	}
+
+	probe := buildProbe(logger, encodedProbe)
 	healthState := &health.State{}
 
 	mainServer := buildServer(ctx, env, healthState, probe, stats, logger)
