@@ -27,9 +27,12 @@ import (
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
+	"github.com/prometheus/common/log"
 	"go.opencensus.io/plugin/ochttp"
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"k8s.io/apimachinery/pkg/types"
 
@@ -44,6 +47,7 @@ import (
 	"knative.dev/pkg/tracing"
 	tracingconfig "knative.dev/pkg/tracing/config"
 	"knative.dev/pkg/tracing/propagation/tracecontextb3"
+
 	"knative.dev/serving/pkg/activator"
 	pkghttp "knative.dev/serving/pkg/http"
 	"knative.dev/serving/pkg/http/handler"
@@ -99,6 +103,10 @@ type config struct {
 	// Concurrency State Endpoint configuration
 	ConcurrencyStateEndpoint  string `split_words:"true"` // optional
 	ConcurrencyStateTokenPath string `split_words:"true"` // optional
+
+	// vHive configuration
+	GuestAddr string `split_words:"true" required:"true"`
+	GuestPort string `split_words:"true" required:"true"`
 }
 
 func init() {
@@ -152,6 +160,21 @@ func main() {
 	}()
 
 	// Setup probe to run for checking user-application healthiness.
+	servingProbe := &corev1.Probe{
+		SuccessThreshold: 1,
+		Handler: corev1.Handler{
+			TCPSocket: &corev1.TCPSocketAction{
+				Host: env.GuestAddr,
+				Port: intstr.FromString(env.GuestPort),
+			},
+		},
+	}
+
+	env.ServingReadinessProbe, err = readiness.EncodeProbe(servingProbe)
+	if err != nil {
+		logger.Fatalw("Failed to create stats reporter", zap.Error(err))
+	}
+
 	probe := func() bool { return true }
 	if env.ServingReadinessProbe != "" {
 		probe = buildProbe(logger, env.ServingReadinessProbe, env.EnableHTTP2AutoDetection).ProbeContainer
@@ -229,7 +252,7 @@ func buildServer(ctx context.Context, env config, probeContainer func() bool, st
 		maxIdleConns = env.ContainerConcurrency
 	}
 
-	target := net.JoinHostPort("127.0.0.1", env.UserPort)
+	target := net.JoinHostPort(env.GuestAddr, env.GuestPort)
 
 	httpProxy := pkghttp.NewHeaderPruningReverseProxy(target, pkghttp.NoHostOverride, activator.RevisionHeaders)
 	httpProxy.Transport = buildTransport(env, logger, maxIdleConns)
