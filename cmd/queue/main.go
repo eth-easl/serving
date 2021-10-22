@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
-	"github.com/prometheus/common/log"
 	"go.opencensus.io/plugin/ochttp"
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
@@ -122,7 +121,6 @@ func init() {
 }
 
 func main() {
-	log.Info("This is the vHive QP code")
 	flag.Parse()
 
 	// If this is set, we run as a standalone binary to probe the queue-proxy.
