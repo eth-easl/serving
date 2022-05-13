@@ -168,7 +168,7 @@ func main() {
 	// Setup probe to run for checking user-application healthiness.
 	servingProbe := &corev1.Probe{
 		SuccessThreshold: 1,
-		Handler: corev1.Handler{
+		ProbeHandler: corev1.ProbeHandler{
 			TCPSocket: &corev1.TCPSocketAction{
 				Host: env.GuestAddr,
 				Port: intstr.FromString(env.GuestPort),
