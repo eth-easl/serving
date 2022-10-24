@@ -85,6 +85,7 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	revID := RevIDFrom(r.Context())
+	a.logger.Debugw("Trying to acquire capacity.", zap.String(logkey.Key, revID.String()))
 	if err := a.throttler.Try(tryContext, revID, func(dest string) error {
 		trySpan.End()
 
@@ -92,6 +93,7 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if tracingEnabled {
 			proxyCtx, proxySpan = trace.StartSpan(r.Context(), "activator_proxy")
 		}
+		a.logger.Debugw("Proxying the request.", zap.String(logkey.Key, revID.String()))
 		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb)
 		proxySpan.End()
 

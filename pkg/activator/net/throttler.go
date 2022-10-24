@@ -219,6 +219,7 @@ func (rt *revisionThrottler) try(ctx context.Context, function func(string) erro
 	// Retrying infinitely as long as we receive no dest. Outer semaphore and inner
 	// pod capacity are not changed atomically, hence they can race each other. We
 	// "reenqueue" requests should that happen.
+	rt.logger.Debugw("Acquiring capacity in try")
 	reenqueue := true
 	for reenqueue {
 		reenqueue = false
@@ -232,6 +233,7 @@ func (rt *revisionThrottler) try(ctx context.Context, function func(string) erro
 			}
 			defer cb()
 			// We already reserved a guaranteed spot. So just execute the passed functor.
+			rt.logger.Debugw("Capacity acquired.")
 			ret = function(tracker.dest)
 		}); err != nil {
 			return err
@@ -526,16 +528,20 @@ func (t *Throttler) Try(ctx context.Context, revID types.NamespacedName, functio
 func (t *Throttler) getOrCreateRevisionThrottler(revID types.NamespacedName) (*revisionThrottler, error) {
 	// First, see if we can succeed with just an RLock. This is in the request path so optimizing
 	// for this case is important
+	t.logger.Debugw("Acquiring revision throttler read lock.", zap.String(logkey.Key, revID.String()))
 	t.revisionThrottlersMutex.RLock()
 	revThrottler, ok := t.revisionThrottlers[revID]
+	t.logger.Debugw("Releasing revision throttler read lock.", zap.String(logkey.Key, revID.String()))
 	t.revisionThrottlersMutex.RUnlock()
 	if ok {
 		return revThrottler, nil
 	}
 
 	// Redo with a write lock since we failed the first time and may need to create
+	t.logger.Debugw("Acquiring revision throttler write lock.", zap.String(logkey.Key, revID.String()))
 	t.revisionThrottlersMutex.Lock()
 	defer t.revisionThrottlersMutex.Unlock()
+	defer t.logger.Debugw("Releasing revision throttler write lock.", zap.String(logkey.Key, revID.String()))
 	revThrottler, ok = t.revisionThrottlers[revID]
 	if !ok {
 		rev, err := t.revisionLister.Revisions(revID.Namespace).Get(revID.Name)
