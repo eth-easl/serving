@@ -95,6 +95,7 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		a.logger.Debugw("Proxying the request.", zap.String(logkey.Key, revID.String()))
 		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb)
+		a.logger.Debugw("Request completed.", zap.String(logkey.Key, revID.String()))
 		proxySpan.End()
 
 		return nil
