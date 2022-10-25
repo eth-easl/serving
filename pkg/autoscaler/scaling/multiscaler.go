@@ -326,6 +326,8 @@ func (m *MultiScaler) createScaler(decider *Decider, key types.NamespacedName) (
 }
 
 func (m *MultiScaler) tickScaler(scaler UniScaler, runner *scalerRunner, metricKey types.NamespacedName) {
+	m.logger.Debugw("MultiScaler.tickScaler - autoscaling cycle started", zap.String(logkey.Key, metricKey.String()))
+	defer m.logger.Debugw("MultiScaler.tickScaler - autoscaling cycle ended", zap.String(logkey.Key, metricKey.String()))
 	sr := scaler.Scale(runner.logger, time.Now())
 
 	if !sr.ScaleValid {
@@ -348,6 +350,7 @@ func (m *MultiScaler) Poke(key types.NamespacedName, stat metrics.Stat) {
 	}
 
 	if scaler.latestScale() == 0 && stat.AverageConcurrentRequests != 0 {
+		m.logger.Debugw("MultiScaler.Poke - Autoscaler has been poked", zap.String(logkey.Key, key.String()))
 		scaler.pokeCh <- struct{}{}
 	}
 }
