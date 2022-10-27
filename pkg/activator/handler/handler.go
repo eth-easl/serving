@@ -19,10 +19,12 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
 	"strings"
+	"sync"
 
 	"go.opencensus.io/plugin/ochttp"
 	"go.opencensus.io/trace"
@@ -75,6 +77,9 @@ func New(_ context.Context, t Throttler, transport http.RoundTripper, usePassthr
 	}
 }
 
+var invocationCounter = make(map[types.NamespacedName]int)
+var invocationCounterMutex = &sync.Mutex{}
+
 func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	config := activatorconfig.FromContext(r.Context())
 	tracingEnabled := config.Tracing.Backend != tracingconfig.None
@@ -85,7 +90,18 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	revID := RevIDFrom(r.Context())
-	a.logger.Debugw("ServeHTTP - before Try", zap.String(logkey.Key, revID.String()))
+
+	invocationCounterMutex.Lock()
+	invocationID := 0
+	if val, ok := invocationCounter[revID]; !ok {
+		invocationCounter[revID] = 0
+	} else {
+		invocationID = val
+	}
+	invocationCounter[revID]++
+	invocationCounterMutex.Unlock()
+
+	a.logger.Debugw(fmt.Sprintf("ServeHTTP #%d - before Try", invocationID), zap.String(logkey.Key, revID.String()))
 	if err := a.throttler.Try(tryContext, revID, func(dest string) error {
 		trySpan.End()
 
@@ -93,9 +109,9 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if tracingEnabled {
 			proxyCtx, proxySpan = trace.StartSpan(r.Context(), "activator_proxy")
 		}
-		a.logger.Debugw("ServeHTTP - Try passed - proxying the request", zap.String(logkey.Key, revID.String()))
+		a.logger.Debugw(fmt.Sprintf("ServeHTTP #%d - Try passed - proxying the request", invocationID), zap.String(logkey.Key, revID.String()))
 		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb)
-		a.logger.Debugw("ServeHTTP - request completed", zap.String(logkey.Key, revID.String()))
+		a.logger.Debugw(fmt.Sprintf("ServeHTTP #%d - request completed", invocationID), zap.String(logkey.Key, revID.String()))
 		proxySpan.End()
 
 		return nil
