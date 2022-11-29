@@ -101,7 +101,7 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	invocationCounter[revID]++
 	invocationCounterMutex.Unlock()
 
-	a.logger.Debugw(fmt.Sprintf("ServeHTTP #%d - before Try", invocationID), zap.String(logkey.Key, revID.String()))
+	a.logger.Infow(fmt.Sprintf("ServeHTTP #%d - before Try", invocationID), zap.String(logkey.Key, revID.String()))
 	if err := a.throttler.Try(tryContext, revID, func(dest string) error {
 		trySpan.End()
 
@@ -109,9 +109,9 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if tracingEnabled {
 			proxyCtx, proxySpan = trace.StartSpan(r.Context(), "activator_proxy")
 		}
-		a.logger.Debugw(fmt.Sprintf("ServeHTTP #%d - Try passed - proxying the request", invocationID), zap.String(logkey.Key, revID.String()))
+		a.logger.Infow(fmt.Sprintf("ServeHTTP #%d - Try passed - proxying the request", invocationID), zap.String(logkey.Key, revID.String()))
 		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb)
-		a.logger.Debugw(fmt.Sprintf("ServeHTTP #%d - request completed", invocationID), zap.String(logkey.Key, revID.String()))
+		a.logger.Infow(fmt.Sprintf("ServeHTTP #%d - request completed", invocationID), zap.String(logkey.Key, revID.String()))
 		proxySpan.End()
 
 		return nil
