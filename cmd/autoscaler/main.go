@@ -88,6 +88,9 @@ func main() {
 	ctx = filteredinformerfactory.WithSelectors(ctx, serving.RevisionUID)
 	ctx, informers := injection.Default.SetupInformers(ctx, cfg)
 
+	log.Print("QPS: ", cfg.QPS)
+	log.Print("Burst: ", cfg.Burst)
+
 	kubeClient := kubeclient.Get(ctx)
 
 	// We sometimes startup faster than we can reach kube-api. Poll on failure to prevent us terminating
