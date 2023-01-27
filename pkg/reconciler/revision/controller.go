@@ -118,7 +118,7 @@ func newControllerWithOptions(
 	}
 
 	digestResolveQueue := workqueue.NewNamedRateLimitingQueue(workqueue.NewMaxOfRateLimiter(
-		newItemExponentialFailureRateLimiter(1*time.Second, 1000*time.Second),
+		newItemExponentialFailureRateLimiter(100*time.Millisecond, 500*time.Millisecond),
 		// 10 qps, 100 bucket size.  This is only for retry speed and its only the overall factor (not per item)
 		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10000), 100000)},
 	), "digests")

@@ -39,6 +39,8 @@ require (
 	sigs.k8s.io/yaml v1.3.0
 )
 
+replace knative.dev/pkg v0.0.0-20220412134708-e325df66cb51 => github.com/cvetkovic/pkg main
+
 require (
 	cloud.google.com/go/compute v1.5.0 // indirect
 	contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d // indirect
