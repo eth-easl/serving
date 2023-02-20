@@ -162,6 +162,10 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 		metricName = autoscaling.Concurrency // concurrency is used by default
 		observedStableValue, observedPanicValue, err = a.metricClient.StableAndPanicConcurrency(metricKey, now)
 	}
+	if err == nil {
+		stableRPS, _, _ := a.metricClient.StableAndPanicRPS(metricKey, now)
+		logger.Infof("RPS: %f and concurrency: %f", stableRPS, observedStableValue)
+	}
 
 	if err != nil {
 		if errors.Is(err, metrics.ErrNoData) {
