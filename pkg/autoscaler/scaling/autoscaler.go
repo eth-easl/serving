@@ -168,12 +168,24 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 		processedRequests, _ := a.metricClient.ResponseTimeEstimate(metricKey, now)
 		logger.Infof("processed requests: %f", processedRequests)
 		responseTime := processedRequests / readyPodsCount
-		// TODO: divide by average of current ready pods count and previous ready pod count (from prev scaling epoch,
-		// which is 2 seconds ago)
-		// TODO: figure out how to determine whether pods are at capacity (queues), maybe if concurrency is larger
-		// than the actual scale?
-		// TODO: figure out what to do for functions with high execution time, leading to 0 processed requests in
-		// most 2 second windows.
+		/*
+			TODO: divide by average of current ready pods count and previous ready pod count (from prev scaling epoch,
+			which is 2 seconds ago)
+			TODO: figure out how to determine whether pods are at capacity (queues), maybe if concurrency is larger
+			than the actual scale?
+			TODO: figure out what to do for functions with high execution time, leading to 0 processed requests in
+			most 2 second windows.
+
+			smooth capacity estimate using exponent
+			STOP capacity estimation after warmup, only do it during pure concurrency based scaling
+
+			keep track of invocations and number of processed requests per minute for whole 1 hour warmup
+			if invocations are always low, only use hybrid for cold start predictions, ignore capacity
+
+			for capacity estimate only use it if there is a minute period of high enough number of processed requests
+			then for that minute use the 30 capacity estimates
+
+		*/
 		logger.Infof("response time estimate: %f", responseTime)
 	}
 
