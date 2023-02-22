@@ -168,6 +168,12 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 		processedRequests, _ := a.metricClient.ResponseTimeEstimate(metricKey, now)
 		logger.Infof("processed requests: %f", processedRequests)
 		responseTime := processedRequests / readyPodsCount
+		// TODO: divide by average of current ready pods count and previous ready pod count (from prev scaling epoch,
+		// which is 2 seconds ago)
+		// TODO: figure out how to determine whether pods are at capacity (queues), maybe if concurrency is larger
+		// than the actual scale?
+		// TODO: figure out what to do for functions with high execution time, leading to 0 processed requests in
+		// most 2 second windows.
 		logger.Infof("response time estimate: %f", responseTime)
 	}
 
