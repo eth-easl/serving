@@ -80,6 +80,8 @@ type MetricClient interface {
 	// StableAndPanicRPS returns both the stable and the panic RPS
 	// for the given replica as of the given time.
 	StableAndPanicRPS(key types.NamespacedName, now time.Time) (float64, float64, error)
+
+	ResponseTimeEstimate(key types.NamespacedName, now time.Time) (float64, error)
 }
 
 // MetricCollector manages collection of metrics for many entities.
@@ -218,6 +220,22 @@ func (c *MetricCollector) StableAndPanicRPS(key types.NamespacedName, now time.T
 		nil
 }
 
+func (c *MetricCollector) ResponseTimeEstimate(key types.NamespacedName, now time.Time) (float64, error) {
+	c.collectionsMutex.RLock()
+	defer c.collectionsMutex.RUnlock()
+
+	collection, exists := c.collections[key]
+	if !exists {
+		return 0, ErrNotCollecting
+	}
+
+	if collection.responseTimeBuckets.IsEmpty(now) && collection.currentMetric().Spec.ScrapeTarget != "" {
+		return 0, ErrNoData
+	}
+	return collection.responseTimeBuckets.WindowAverage(now),
+		nil
+}
+
 type (
 	// windowAverager is the client side abstraction for various bucket types.
 	windowAverager interface {
@@ -239,6 +257,7 @@ type (
 		concurrencyPanicBuckets windowAverager
 		rpsBuckets              windowAverager
 		rpsPanicBuckets         windowAverager
+		responseTimeBuckets     windowAverager
 
 		// Fields relevant for metric scraping specifically.
 		scraper StatsScraper
@@ -276,6 +295,10 @@ func newCollection(metric *autoscalingv1alpha1.Metric, scraper StatsScraper, clo
 		}
 	}
 
+	responseTimeBucketCtor := func(w time.Duration, g time.Duration) windowAverager {
+		return aggregation.NewWeightedFloat64Buckets(w, g)
+	}
+
 	c := &collection{
 		metric: metric,
 		concurrencyBuckets: bucketCtor(
@@ -286,6 +309,8 @@ func newCollection(metric *autoscalingv1alpha1.Metric, scraper StatsScraper, clo
 			metric.Spec.StableWindow, config.BucketSize),
 		rpsPanicBuckets: bucketCtor(
 			metric.Spec.PanicWindow, config.BucketSize),
+		responseTimeBuckets: responseTimeBucketCtor(
+			time.Minute, config.BucketSize),
 		scraper: scraper,
 
 		stopCh: make(chan struct{}),
@@ -347,6 +372,7 @@ func (c *collection) updateMetric(metric *autoscalingv1alpha1.Metric) {
 	c.concurrencyPanicBuckets.ResizeWindow(metric.Spec.PanicWindow)
 	c.rpsBuckets.ResizeWindow(metric.Spec.StableWindow)
 	c.rpsPanicBuckets.ResizeWindow(metric.Spec.PanicWindow)
+	c.responseTimeBuckets.ResizeWindow(time.Minute)
 }
 
 // currentMetric safely returns the current metric stored in the collection.
@@ -387,6 +413,7 @@ func (c *collection) record(now time.Time, stat Stat) {
 	rps := stat.RequestCount - stat.ProxiedRequestCount
 	c.rpsBuckets.Record(now, rps)
 	c.rpsPanicBuckets.Record(now, rps)
+	c.responseTimeBuckets.Record(now, 1.0)
 }
 
 // add adds the stats from `src` to `dst`.
