@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"errors"
+	"math"
 	"sync"
 	"time"
 
@@ -259,6 +260,8 @@ type (
 		rpsPanicBuckets         windowAverager
 		responseTimeBuckets     windowAverager
 
+		prevConcurrency float64
+
 		// Fields relevant for metric scraping specifically.
 		scraper StatsScraper
 		lastErr error
@@ -295,10 +298,6 @@ func newCollection(metric *autoscalingv1alpha1.Metric, scraper StatsScraper, clo
 		}
 	}
 
-	responseTimeBucketCtor := func(w time.Duration, g time.Duration) windowAverager {
-		return aggregation.NewWeightedFloat64Buckets(w, g)
-	}
-
 	c := &collection{
 		metric: metric,
 		concurrencyBuckets: bucketCtor(
@@ -309,8 +308,8 @@ func newCollection(metric *autoscalingv1alpha1.Metric, scraper StatsScraper, clo
 			metric.Spec.StableWindow, config.BucketSize),
 		rpsPanicBuckets: bucketCtor(
 			metric.Spec.PanicWindow, config.BucketSize),
-		responseTimeBuckets: responseTimeBucketCtor(
-			time.Minute, config.BucketSize),
+		responseTimeBuckets: bucketCtor(
+			2*time.Second, config.BucketSize),
 		scraper: scraper,
 
 		stopCh: make(chan struct{}),
@@ -372,7 +371,7 @@ func (c *collection) updateMetric(metric *autoscalingv1alpha1.Metric) {
 	c.concurrencyPanicBuckets.ResizeWindow(metric.Spec.PanicWindow)
 	c.rpsBuckets.ResizeWindow(metric.Spec.StableWindow)
 	c.rpsPanicBuckets.ResizeWindow(metric.Spec.PanicWindow)
-	c.responseTimeBuckets.ResizeWindow(time.Minute)
+	c.responseTimeBuckets.ResizeWindow(2 * time.Second)
 }
 
 // currentMetric safely returns the current metric stored in the collection.
@@ -413,7 +412,10 @@ func (c *collection) record(now time.Time, stat Stat) {
 	rps := stat.RequestCount - stat.ProxiedRequestCount
 	c.rpsBuckets.Record(now, rps)
 	c.rpsPanicBuckets.Record(now, rps)
-	c.responseTimeBuckets.Record(now, 1.0)
+
+	processedRequests := math.Max(c.prevConcurrency+rps-concur, 0)
+	c.prevConcurrency = concur
+	c.responseTimeBuckets.Record(now, processedRequests)
 }
 
 // add adds the stats from `src` to `dst`.

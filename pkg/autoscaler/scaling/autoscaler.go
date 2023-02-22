@@ -165,8 +165,10 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	if err == nil {
 		stableRPS, _, _ := a.metricClient.StableAndPanicRPS(metricKey, now)
 		logger.Infof("RPS: %f and concurrency: %f", stableRPS, observedStableValue)
-		responseTime, _ := a.metricClient.ResponseTimeEstimate(metricKey, now)
-		logger.Infof("Response time: %f", responseTime)
+		processedRequests, _ := a.metricClient.ResponseTimeEstimate(metricKey, now)
+		logger.Infof("processed requests: %f", processedRequests)
+		responseTime := processedRequests / readyPodsCount
+		logger.Infof("response time estimate: %f", responseTime)
 	}
 
 	if err != nil {
