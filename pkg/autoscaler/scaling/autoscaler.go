@@ -385,25 +385,6 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		a.processedRequestsPerMinute[a.currentMinute] += processedRequests
 		// add to current minute
 	}
-	/*
-		TODO: divide by average of current ready pods count and previous ready pod count (from prev scaling epoch,
-		which is 2 seconds ago)
-		TODO: figure out how to determine whether pods are at capacity (queues), maybe if concurrency is larger
-		than the actual scale?
-		TODO: figure out what to do for functions with high execution time, leading to 0 processed requests in
-		most 2 second windows.
-
-		smooth capacity estimate using exponent
-		STOP capacity estimation after warmup, only do it during pure concurrency based scaling
-
-		keep track of invocations and number of processed requests per minute for whole 1 hour warmup
-		if invocations are always low, only use hybrid for cold start predictions, ignore capacity
-
-		for capacity estimate only use it if there is a minute period of high enough number of processed requests
-		then for that minute use the 30 capacity estimates
-		can use bucketing that collecter uses, so we don't rewrite this
-
-	*/
 	observedConcurrency, _, err := a.metricClient.StableAndPanicConcurrency(metricKey, now)
 	if err != nil {
 		if err == metrics.ErrNoData {
@@ -422,6 +403,26 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 
 		// capacity estimate should be computed here, stop computing it after warmup period of 60 min
 
+		/*
+			TODO: divide by average of current ready pods count and previous ready pod count (from prev scaling epoch,
+			which is 2 seconds ago)
+			TODO: figure out how to determine whether pods are at capacity (queues), maybe if concurrency is larger
+			than the actual scale?
+			TODO: figure out what to do for functions with high execution time, leading to 0 processed requests in
+			most 2 second windows.
+
+			smooth capacity estimate using exponent
+			STOP capacity estimation after warmup, only do it during pure concurrency based scaling
+
+			keep track of invocations and number of processed requests per minute for whole 1 hour warmup
+			if invocations are always low, only use hybrid for cold start predictions, ignore capacity
+
+			for capacity estimate only use it if there is a minute period of high enough number of processed requests
+			then for that minute use the 30 capacity estimates
+			can use bucketing that collecter uses, so we don't rewrite this
+
+		*/
+
 	} else {
 		// TODO: hybrid scaling
 		if !a.windowResized {
@@ -436,7 +437,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		if prevMinute < a.currentMinute {
 			prediction = fourierExtrapolation(a.invocationsPerMinute, 30)
 		}
-		desiredPredictedScale := prediction * 1 // TODO: use capacity
+		desiredPredictedScale := 1 * prediction / 60 // TODO: use capacity
 		desiredScale = math.Ceil(math.Max(observedConcurrency, desiredPredictedScale))
 	}
 
