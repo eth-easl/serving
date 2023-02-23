@@ -67,6 +67,7 @@ type autoscaler struct {
 	capacityEstimateWindow     []float64
 	startTime                  time.Time
 	currentMinute              int
+	windowResized              bool
 }
 
 // New creates a new instance of default autoscaler implementation.
@@ -418,26 +419,46 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 	if a.currentMinute < 60 {
 		desiredScale = math.Ceil(observedConcurrency)
 		// purely concurrency based scaling for first 60 minutes
+
+		// capacity estimate should be computed here, stop computing it after warmup period of 60 min
+
 	} else {
 		// TODO: hybrid scaling
-		variance, mean := ComputeVariance(a.invocationsPerMinute)
-		var windowInSeconds time.Duration
-		if variance == 0 || mean == 0 {
-			windowInSeconds = 60 * time.Second
-		} else {
-			std := math.Sqrt(variance)
-			windowInSeconds = time.Duration((math.Round(20 * mean / std)) * float64(time.Second))
+		if !a.windowResized {
+			err := a.resizeWindow(metricKey)
+			if err != nil {
+				logger.Errorw("Failed to resize window", zap.Error(err))
+				return -1
+				// -1 is interpreted as invalid scale
+			}
 		}
-		if windowInSeconds > 600 {
-			// maximum window size should be 10 minutes (600 seconds)
-			windowInSeconds = 600 * time.Second
-		} else if windowInSeconds < 20 {
-			// less than 20 seconds is too noisy
-			windowInSeconds = 20 * time.Second
+		var prediction float64
+		if prevMinute < a.currentMinute {
+			prediction = fourierExtrapolation(a.invocationsPerMinute, 30)
 		}
-		a.metricClient.ResizeConcurrencyWindow(metricKey, windowInSeconds)
-		desiredScale = math.Ceil(observedConcurrency)
+		desiredPredictedScale := prediction * 1 // TODO: use capacity
+		desiredScale = math.Ceil(math.Max(observedConcurrency, desiredPredictedScale))
 	}
 
 	return math.Ceil(desiredScale)
+}
+
+func (a *autoscaler) resizeWindow(metricKey types.NamespacedName) error {
+	variance, mean := ComputeVariance(a.invocationsPerMinute)
+	var windowInSeconds time.Duration
+	if variance == 0 || mean == 0 {
+		windowInSeconds = 60 * time.Second
+	} else {
+		std := math.Sqrt(variance)
+		windowInSeconds = time.Duration((math.Round(20 * mean / std)) * float64(time.Second))
+	}
+	if windowInSeconds > 600 {
+		// maximum window size should be 10 minutes (600 seconds)
+		windowInSeconds = 600 * time.Second
+	} else if windowInSeconds < 20 {
+		// less than 20 seconds is too noisy
+		windowInSeconds = 20 * time.Second
+	}
+	err := a.metricClient.ResizeConcurrencyWindow(metricKey, windowInSeconds)
+	return err
 }
