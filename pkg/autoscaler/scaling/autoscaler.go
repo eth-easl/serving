@@ -60,6 +60,13 @@ type autoscaler struct {
 	// specMux guards the current DeciderSpec.
 	specMux     sync.RWMutex
 	deciderSpec *DeciderSpec
+
+	// hybrid policy
+	invocationsPerMinute       []float64
+	processedRequestsPerMinute []float64
+	capacityEstimateWindow     []float64
+	startTime                  time.Time
+	currentMinute              int
 }
 
 // New creates a new instance of default autoscaler implementation.
@@ -155,38 +162,15 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 
 	metricName := spec.ScalingMetric
 	var observedStableValue, observedPanicValue float64
+	var dspc, dppc float64
 	switch spec.ScalingMetric {
 	case autoscaling.RPS:
 		observedStableValue, observedPanicValue, err = a.metricClient.StableAndPanicRPS(metricKey, now)
+	case autoscaling.Hybrid:
+		dspc = a.hybridScaling(readyPodsCount, metricKey, now, logger)
 	default:
 		metricName = autoscaling.Concurrency // concurrency is used by default
 		observedStableValue, observedPanicValue, err = a.metricClient.StableAndPanicConcurrency(metricKey, now)
-	}
-	if err == nil {
-		stableRPS, _, _ := a.metricClient.StableAndPanicRPS(metricKey, now)
-		logger.Infof("RPS: %f and concurrency: %f", stableRPS, observedStableValue)
-		processedRequests, _ := a.metricClient.ResponseTimeEstimate(metricKey, now)
-		logger.Infof("processed requests: %f", processedRequests)
-		responseTime := processedRequests / readyPodsCount
-		/*
-			TODO: divide by average of current ready pods count and previous ready pod count (from prev scaling epoch,
-			which is 2 seconds ago)
-			TODO: figure out how to determine whether pods are at capacity (queues), maybe if concurrency is larger
-			than the actual scale?
-			TODO: figure out what to do for functions with high execution time, leading to 0 processed requests in
-			most 2 second windows.
-
-			smooth capacity estimate using exponent
-			STOP capacity estimation after warmup, only do it during pure concurrency based scaling
-
-			keep track of invocations and number of processed requests per minute for whole 1 hour warmup
-			if invocations are always low, only use hybrid for cold start predictions, ignore capacity
-
-			for capacity estimate only use it if there is a minute period of high enough number of processed requests
-			then for that minute use the 30 capacity estimates
-
-		*/
-		logger.Infof("response time estimate: %f", responseTime)
 	}
 
 	if err != nil {
@@ -209,79 +193,83 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	if spec.Reachable {
 		maxScaleDown = math.Floor(readyPodsCount / spec.MaxScaleDownRate)
 	}
-
-	dspc := math.Ceil(observedStableValue / spec.TargetValue)
-	dppc := math.Ceil(observedPanicValue / spec.TargetValue)
-	if debugEnabled {
-		desugared.Debug(
-			fmt.Sprintf("For metric %s observed values: stable = %0.3f; panic = %0.3f; target = %0.3f "+
-				"Desired StablePodCount = %0.0f, PanicPodCount = %0.0f, ReadyEndpointCount = %d, MaxScaleUp = %0.0f, MaxScaleDown = %0.0f",
-				metricName, observedStableValue, observedPanicValue, spec.TargetValue,
-				dspc, dppc, originalReadyPodsCount, maxScaleUp, maxScaleDown))
+	if spec.ScalingMetric == autoscaling.Concurrency || spec.ScalingMetric == autoscaling.RPS {
+		dspc = math.Ceil(observedStableValue / spec.TargetValue)
+		dppc = math.Ceil(observedPanicValue / spec.TargetValue)
+		if debugEnabled {
+			desugared.Debug(
+				fmt.Sprintf("For metric %s observed values: stable = %0.3f; panic = %0.3f; target = %0.3f "+
+					"Desired StablePodCount = %0.0f, PanicPodCount = %0.0f, ReadyEndpointCount = %d, MaxScaleUp = %0.0f, MaxScaleDown = %0.0f",
+					metricName, observedStableValue, observedPanicValue, spec.TargetValue,
+					dspc, dppc, originalReadyPodsCount, maxScaleUp, maxScaleDown))
+		}
 	}
 
 	// We want to keep desired pod count in the  [maxScaleDown, maxScaleUp] range.
 	desiredStablePodCount := int32(math.Min(math.Max(dspc, maxScaleDown), maxScaleUp))
 	desiredPanicPodCount := int32(math.Min(math.Max(dppc, maxScaleDown), maxScaleUp))
 
-	isOverPanicThreshold := dppc/readyPodsCount >= spec.PanicThreshold
+	if spec.ScalingMetric == autoscaling.Concurrency || spec.ScalingMetric == autoscaling.RPS {
+		isOverPanicThreshold := dppc/readyPodsCount >= spec.PanicThreshold
 
-	if a.panicTime.IsZero() && isOverPanicThreshold {
-		// Begin panicking when we cross the threshold in the panic window.
-		logger.Info("PANICKING.")
-		a.panicTime = now
-		pkgmetrics.Record(a.reporterCtx, panicM.M(1))
-	} else if isOverPanicThreshold {
-		// If we're still over panic threshold right now — extend the panic window.
-		a.panicTime = now
-	} else if !a.panicTime.IsZero() && !isOverPanicThreshold && a.panicTime.Add(spec.StableWindow).Before(now) {
-		// Stop panicking after the surge has made its way into the stable metric.
-		logger.Info("Un-panicking.")
-		a.panicTime = time.Time{}
-		a.maxPanicPods = 0
-		pkgmetrics.Record(a.reporterCtx, panicM.M(0))
+		if a.panicTime.IsZero() && isOverPanicThreshold {
+			// Begin panicking when we cross the threshold in the panic window.
+			logger.Info("PANICKING.")
+			a.panicTime = now
+			pkgmetrics.Record(a.reporterCtx, panicM.M(1))
+		} else if isOverPanicThreshold {
+			// If we're still over panic threshold right now — extend the panic window.
+			a.panicTime = now
+		} else if !a.panicTime.IsZero() && !isOverPanicThreshold && a.panicTime.Add(spec.StableWindow).Before(now) {
+			// Stop panicking after the surge has made its way into the stable metric.
+			logger.Info("Un-panicking.")
+			a.panicTime = time.Time{}
+			a.maxPanicPods = 0
+			pkgmetrics.Record(a.reporterCtx, panicM.M(0))
+		}
 	}
-
 	desiredPodCount := desiredStablePodCount
-	if !a.panicTime.IsZero() {
-		// In some edgecases stable window metric might be larger
-		// than panic one. And we should provision for stable as for panic,
-		// so pick the larger of the two.
-		if desiredPodCount < desiredPanicPodCount {
-			desiredPodCount = desiredPanicPodCount
-		}
-		logger.Debug("Operating in panic mode.")
-		// We do not scale down while in panic mode. Only increases will be applied.
-		if desiredPodCount > a.maxPanicPods {
-			logger.Infof("Increasing pods count from %d to %d.", originalReadyPodsCount, desiredPodCount)
-			a.maxPanicPods = desiredPodCount
-		} else if desiredPodCount < a.maxPanicPods {
-			logger.Infof("Skipping pod count decrease from %d to %d.", a.maxPanicPods, desiredPodCount)
-		}
-		desiredPodCount = a.maxPanicPods
-	} else {
-		logger.Debug("Operating in stable mode.")
-	}
+	if spec.ScalingMetric == autoscaling.Concurrency || spec.ScalingMetric == autoscaling.RPS {
 
-	// Delay scale down decisions, if a ScaleDownDelay was specified.
-	// We only do this if there's a non-nil delayWindow because although a
-	// one-element delay window is _almost_ the same as no delay at all, it is
-	// not the same in the case where two Scale()s happen in the same time
-	// interval (because the largest will be picked rather than the most recent
-	// in that case).
-	if a.delayWindow != nil {
-		a.delayWindow.Record(now, desiredPodCount)
-		delayedPodCount := a.delayWindow.Current()
-		if delayedPodCount != desiredPodCount {
-			if debugEnabled {
-				desugared.Debug(
-					fmt.Sprintf("Delaying scale to %d, staying at %d",
-						desiredPodCount, delayedPodCount))
+		if !a.panicTime.IsZero() {
+			// In some edgecases stable window metric might be larger
+			// than panic one. And we should provision for stable as for panic,
+			// so pick the larger of the two.
+			if desiredPodCount < desiredPanicPodCount {
+				desiredPodCount = desiredPanicPodCount
 			}
-			desiredPodCount = delayedPodCount
+			logger.Debug("Operating in panic mode.")
+			// We do not scale down while in panic mode. Only increases will be applied.
+			if desiredPodCount > a.maxPanicPods {
+				logger.Infof("Increasing pods count from %d to %d.", originalReadyPodsCount, desiredPodCount)
+				a.maxPanicPods = desiredPodCount
+			} else if desiredPodCount < a.maxPanicPods {
+				logger.Infof("Skipping pod count decrease from %d to %d.", a.maxPanicPods, desiredPodCount)
+			}
+			desiredPodCount = a.maxPanicPods
+		} else {
+			logger.Debug("Operating in stable mode.")
+		}
+
+		// Delay scale down decisions, if a ScaleDownDelay was specified.
+		// We only do this if there's a non-nil delayWindow because although a
+		// one-element delay window is _almost_ the same as no delay at all, it is
+		// not the same in the case where two Scale()s happen in the same time
+		// interval (because the largest will be picked rather than the most recent
+		// in that case).
+		if a.delayWindow != nil {
+			a.delayWindow.Record(now, desiredPodCount)
+			delayedPodCount := a.delayWindow.Current()
+			if delayedPodCount != desiredPodCount {
+				if debugEnabled {
+					desugared.Debug(
+						fmt.Sprintf("Delaying scale to %d, staying at %d",
+							desiredPodCount, delayedPodCount))
+				}
+				desiredPodCount = delayedPodCount
+			}
 		}
 	}
-
 	// Compute excess burst capacity
 	//
 	// the excess burst capacity is based on panic value, since we don't want to
@@ -296,6 +284,7 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	case spec.TargetBurstCapacity > 0:
 		totCap := float64(originalReadyPodsCount) * spec.TotalValue
 		excessBCF = math.Floor(totCap - spec.TargetBurstCapacity - observedPanicValue)
+		// TODO: observed panic value is always 0 for hybrid, is that an issue?
 	}
 
 	if debugEnabled {
@@ -312,6 +301,15 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 			stableRPSM.M(observedStableValue),
 			panicRPSM.M(observedStableValue),
 			targetRPSM.M(spec.TargetValue),
+		)
+	case autoscaling.Hybrid:
+		pkgmetrics.RecordBatch(a.reporterCtx,
+			excessBurstCapacityM.M(excessBCF),
+			desiredPodCountM.M(int64(desiredPodCount)),
+			stableRequestConcurrencyM.M(-1),
+			panicRequestConcurrencyM.M(-1),
+			targetRequestConcurrencyM.M(-1),
+			// TODO: think about what to record
 		)
 	default:
 		pkgmetrics.RecordBatch(a.reporterCtx,
@@ -334,4 +332,92 @@ func (a *autoscaler) currentSpec() *DeciderSpec {
 	a.specMux.RLock()
 	defer a.specMux.RUnlock()
 	return a.deciderSpec
+}
+
+func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.NamespacedName,
+	now time.Time, logger *zap.SugaredLogger) float64 {
+	if a.startTime.IsZero() {
+		a.startTime = now
+		a.currentMinute = 0
+		logger.Infof("current minute is 0")
+	}
+	prevMinute := a.currentMinute
+	a.currentMinute = int(now.Sub(a.startTime).Minutes())
+	logger.Infof("current minute: %d", a.currentMinute)
+
+	if prevMinute < a.currentMinute {
+		observedRps, _, err := a.metricClient.StableAndPanicRPS(metricKey, now)
+		if err != nil {
+			if err == metrics.ErrNoData {
+				logger.Debug("0 invocations for previous minute")
+				// observed rps will be 0 then, so this is ok
+			} else {
+				logger.Errorw("Failed to obtain metrics", zap.Error(err))
+				return -1
+				// TODO: -1 should be interpreted as invalid scale
+			}
+		}
+		a.invocationsPerMinute = append(a.invocationsPerMinute, observedRps*60)
+		// multiply by 60 to get the number of invocations for that minute
+	}
+
+	processedRequests, err := a.metricClient.ResponseTimeEstimate(metricKey, now)
+	logger.Infof("processed requests: %f", processedRequests)
+	if err != nil {
+		if err == metrics.ErrNoData {
+			logger.Debug("No requests processed yet")
+			// log but just continue, because it's normal that before we scale there are no processed requests
+		} else {
+			logger.Errorw("Failed to obtain metrics", zap.Error(err))
+			return -1
+			// TODO: -1 should be interpreted as invalid scale
+		}
+	}
+
+	if a.currentMinute+1 > len(a.processedRequestsPerMinute) {
+		a.processedRequestsPerMinute = append(a.processedRequestsPerMinute, processedRequests)
+	} else {
+		a.processedRequestsPerMinute[a.currentMinute] += processedRequests
+		// add to current minute
+	}
+	/*
+		TODO: divide by average of current ready pods count and previous ready pod count (from prev scaling epoch,
+		which is 2 seconds ago)
+		TODO: figure out how to determine whether pods are at capacity (queues), maybe if concurrency is larger
+		than the actual scale?
+		TODO: figure out what to do for functions with high execution time, leading to 0 processed requests in
+		most 2 second windows.
+
+		smooth capacity estimate using exponent
+		STOP capacity estimation after warmup, only do it during pure concurrency based scaling
+
+		keep track of invocations and number of processed requests per minute for whole 1 hour warmup
+		if invocations are always low, only use hybrid for cold start predictions, ignore capacity
+
+		for capacity estimate only use it if there is a minute period of high enough number of processed requests
+		then for that minute use the 30 capacity estimates
+		can use bucketing that collecter uses, so we don't rewrite this
+
+	*/
+	observedConcurrency, _, err := a.metricClient.StableAndPanicConcurrency(metricKey, now)
+	if err != nil {
+		if err == metrics.ErrNoData {
+			logger.Debug("No requests in the system currently")
+			// log but just continue, we might want to scale up anyways based on predictions
+		} else {
+			logger.Errorw("Failed to obtain metrics", zap.Error(err))
+			return -1
+			// TODO: -1 should be interpreted as invalid scale
+		}
+	}
+	var desiredScale float64
+	if a.currentMinute < 60 {
+		desiredScale = math.Ceil(observedConcurrency)
+		// purely concurrency based scaling for first 60 minutes
+	} else {
+		// TODO: hybrid scaling
+		desiredScale = math.Ceil(observedConcurrency)
+	}
+
+	return math.Ceil(desiredScale)
 }

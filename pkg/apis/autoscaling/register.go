@@ -71,6 +71,8 @@ const (
 	Memory = "memory"
 	// RPS is the requests per second reaching the Pod.
 	RPS = "rps"
+	// Hybrid policy uses multiple metrics
+	Hybrid = "hybrid"
 
 	// TargetAnnotationKey is the annotation to specify what metric value the
 	// PodAutoscaler should attempt to maintain. For example,
