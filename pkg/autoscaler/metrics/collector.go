@@ -83,6 +83,8 @@ type MetricClient interface {
 	StableAndPanicRPS(key types.NamespacedName, now time.Time) (float64, float64, error)
 
 	ResponseTimeEstimate(key types.NamespacedName, now time.Time) (float64, error)
+
+	ResizeConcurrencyWindow(key types.NamespacedName, windowInSeconds time.Duration) error
 }
 
 // MetricCollector manages collection of metrics for many entities.
@@ -235,6 +237,15 @@ func (c *MetricCollector) ResponseTimeEstimate(key types.NamespacedName, now tim
 	}
 	return collection.responseTimeBuckets.WindowAverage(now),
 		nil
+}
+
+func (c *MetricCollector) ResizeConcurrencyWindow(key types.NamespacedName, windowInSeconds time.Duration) error {
+	collection, exists := c.collections[key]
+	if !exists {
+		return ErrNotCollecting
+	}
+	collection.concurrencyBuckets.ResizeWindow(windowInSeconds)
+	return nil
 }
 
 type (

@@ -168,6 +168,9 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 		observedStableValue, observedPanicValue, err = a.metricClient.StableAndPanicRPS(metricKey, now)
 	case autoscaling.Hybrid:
 		dspc = a.hybridScaling(readyPodsCount, metricKey, now, logger)
+		if dspc == -1 {
+			return invalidSR
+		}
 	default:
 		metricName = autoscaling.Concurrency // concurrency is used by default
 		observedStableValue, observedPanicValue, err = a.metricClient.StableAndPanicConcurrency(metricKey, now)
@@ -340,6 +343,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		a.startTime = now
 		a.currentMinute = 0
 		logger.Infof("current minute is 0")
+
 	}
 	prevMinute := a.currentMinute
 	a.currentMinute = int(now.Sub(a.startTime).Minutes())
@@ -354,7 +358,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 			} else {
 				logger.Errorw("Failed to obtain metrics", zap.Error(err))
 				return -1
-				// TODO: -1 should be interpreted as invalid scale
+				// -1 is interpreted as invalid scale
 			}
 		}
 		a.invocationsPerMinute = append(a.invocationsPerMinute, observedRps*60)
@@ -370,7 +374,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		} else {
 			logger.Errorw("Failed to obtain metrics", zap.Error(err))
 			return -1
-			// TODO: -1 should be interpreted as invalid scale
+			// -1 is interpreted as invalid scale
 		}
 	}
 
@@ -407,7 +411,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		} else {
 			logger.Errorw("Failed to obtain metrics", zap.Error(err))
 			return -1
-			// TODO: -1 should be interpreted as invalid scale
+			// -1 is interpreted as invalid scale
 		}
 	}
 	var desiredScale float64
@@ -416,6 +420,22 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		// purely concurrency based scaling for first 60 minutes
 	} else {
 		// TODO: hybrid scaling
+		variance, mean := ComputeVariance(a.invocationsPerMinute)
+		var windowInSeconds time.Duration
+		if variance == 0 || mean == 0 {
+			windowInSeconds = 60 * time.Second
+		} else {
+			std := math.Sqrt(variance)
+			windowInSeconds = time.Duration((math.Round(20 * mean / std)) * float64(time.Second))
+		}
+		if windowInSeconds > 600 {
+			// maximum window size should be 10 minutes (600 seconds)
+			windowInSeconds = 600 * time.Second
+		} else if windowInSeconds < 20 {
+			// less than 20 seconds is too noisy
+			windowInSeconds = 20 * time.Second
+		}
+		a.metricClient.ResizeConcurrencyWindow(metricKey, windowInSeconds)
 		desiredScale = math.Ceil(observedConcurrency)
 	}
 
