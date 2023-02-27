@@ -68,6 +68,11 @@ type autoscaler struct {
 	startTime                  time.Time
 	currentMinute              int
 	windowResized              bool
+	previousReadyPodsCount     float64
+	averageCapacity            float64
+	previousPrediction         float64
+	pastAverageCapacityValues  []float64
+	stability                  float64
 }
 
 // New creates a new instance of default autoscaler implementation.
@@ -402,29 +407,36 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		// purely concurrency based scaling for first 60 minutes
 
 		// capacity estimate should be computed here, stop computing it after warmup period of 60 min
-
-		/*
-			TODO: divide by average of current ready pods count and previous ready pod count (from prev scaling epoch,
-			which is 2 seconds ago)
-			TODO: figure out how to determine whether pods are at capacity (queues), maybe if concurrency is larger
-			than the actual scale?
-			TODO: figure out what to do for functions with high execution time, leading to 0 processed requests in
-			most 2 second windows.
-
-			smooth capacity estimate using exponent
-			STOP capacity estimation after warmup, only do it during pure concurrency based scaling
-
-			keep track of invocations and number of processed requests per minute for whole 1 hour warmup
-			if invocations are always low, only use hybrid for cold start predictions, ignore capacity
-
-			for capacity estimate only use it if there is a minute period of high enough number of processed requests
-			then for that minute use the 30 capacity estimates
-			can use bucketing that collecter uses, so we don't rewrite this
-
-		*/
+		averagePodCount := (readyPodsCount + a.previousReadyPodsCount) / 2
+		a.previousReadyPodsCount = readyPodsCount
+		// previous ready pod count might be 0, but it's reasonable to assume we didn't have the current
+		// ready pod count for the entire 2 second period
+		capacity := processedRequests / averagePodCount
+		a.capacityEstimateWindow = append(a.capacityEstimateWindow, capacity)
+		if prevMinute < a.currentMinute {
+			if a.processedRequestsPerMinute[prevMinute] > 60 &&
+				a.processedRequestsPerMinute[prevMinute]/a.invocationsPerMinute[prevMinute] < 1.2 &&
+				a.processedRequestsPerMinute[prevMinute]/a.invocationsPerMinute[prevMinute] > 0.8 {
+				// number of processed requests is high enough to get decent estimate
+				// number of processed requests does not deviate from the invocations during that minute by too much
+				var sum float64
+				for i := 0; i < len(a.capacityEstimateWindow); i++ {
+					sum += a.capacityEstimateWindow[i]
+				}
+				averagePrevMinute := sum / float64(len(a.capacityEstimateWindow))
+				if a.averageCapacity == 0 {
+					a.averageCapacity = averagePrevMinute
+				} else {
+					a.averageCapacity = a.averageCapacity*0.8 + averagePrevMinute*0.2
+				}
+				a.pastAverageCapacityValues = append(a.pastAverageCapacityValues, averagePrevMinute)
+			} else {
+				a.capacityEstimateWindow = nil
+				// reset capacity estimate window
+			}
+		}
 
 	} else {
-		// TODO: hybrid scaling
 		if !a.windowResized {
 			err := a.resizeWindow(metricKey)
 			if err != nil {
@@ -432,13 +444,26 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 				return -1
 				// -1 is interpreted as invalid scale
 			}
+			variance, mean := ComputeVariance(a.pastAverageCapacityValues)
+			if variance > 0 {
+				a.stability = mean / math.Sqrt(variance)
+			}
 		}
 		var prediction float64
 		if prevMinute < a.currentMinute {
 			prediction = fourierExtrapolation(a.invocationsPerMinute, 30)
+			a.previousPrediction = prediction
+		} else {
+			prediction = a.previousPrediction
 		}
-		desiredPredictedScale := 1 * prediction / 60 // TODO: use capacity
-		desiredScale = math.Ceil(math.Max(observedConcurrency, desiredPredictedScale))
+		desiredPredictedScale := (1 / a.averageCapacity) * prediction / 60
+		if a.stability > 1 {
+			desiredScale = math.Ceil(math.Max(observedConcurrency, desiredPredictedScale))
+		} else if prediction == 1 {
+			desiredScale = math.Ceil(math.Max(observedConcurrency, 1))
+		} else {
+			desiredScale = math.Ceil(observedConcurrency)
+		}
 	}
 
 	return math.Ceil(desiredScale)
