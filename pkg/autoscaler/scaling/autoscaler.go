@@ -430,15 +430,19 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 					a.averageCapacity = a.averageCapacity*0.8 + averagePrevMinute*0.2
 				}
 				a.pastAverageCapacityValues = append(a.pastAverageCapacityValues, averagePrevMinute)
+				logger.Infof("Average capacity previous minute %f average capacity %f",
+					averagePrevMinute, a.averageCapacity)
 			} else {
 				a.capacityEstimateWindow = nil
 				// reset capacity estimate window
 			}
+			logger.Infof("Processed requests: %f invocations this minute: %f",
+				a.processedRequestsPerMinute[prevMinute], a.invocationsPerMinute[prevMinute])
 		}
 
 	} else {
 		if !a.windowResized {
-			err := a.resizeWindow(metricKey)
+			err := a.resizeWindow(metricKey, logger)
 			if err != nil {
 				logger.Errorw("Failed to resize window", zap.Error(err))
 				return -1
@@ -459,17 +463,23 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		desiredPredictedScale := (1 / a.averageCapacity) * prediction / 60
 		if a.stability > 1 {
 			desiredScale = math.Ceil(math.Max(observedConcurrency, desiredPredictedScale))
+			logger.Infof("Stability: %f observed concurrency: %f predicted scale: %f",
+				a.stability, observedConcurrency, desiredPredictedScale)
 		} else if prediction == 1 {
 			desiredScale = math.Ceil(math.Max(observedConcurrency, 1))
+			logger.Infof("Stability: %f observed concurrency: %f prediction: 1",
+				a.stability, observedConcurrency)
 		} else {
 			desiredScale = math.Ceil(observedConcurrency)
+			logger.Infof("Stability: %f observed concurrency: %f",
+				a.stability, observedConcurrency)
 		}
 	}
-
+	logger.Infof("Desired scale is %f", desiredScale)
 	return math.Ceil(desiredScale)
 }
 
-func (a *autoscaler) resizeWindow(metricKey types.NamespacedName) error {
+func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.SugaredLogger) error {
 	variance, mean := ComputeVariance(a.invocationsPerMinute)
 	var windowInSeconds time.Duration
 	if variance == 0 || mean == 0 {
@@ -485,6 +495,7 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName) error {
 		// less than 20 seconds is too noisy
 		windowInSeconds = 20 * time.Second
 	}
+	logger.Infof("Setting window size to %f seconds", windowInSeconds.Seconds())
 	err := a.metricClient.ResizeConcurrencyWindow(metricKey, windowInSeconds)
 	return err
 }
