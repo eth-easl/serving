@@ -82,7 +82,7 @@ type MetricClient interface {
 	// for the given replica as of the given time.
 	StableAndPanicRPS(key types.NamespacedName, now time.Time) (float64, float64, error)
 
-	ResponseTimeEstimate(key types.NamespacedName, now time.Time) (float64, error)
+	ProcessedRequestsEstimate(key types.NamespacedName, now time.Time) (float64, error)
 
 	ResizeConcurrencyWindow(key types.NamespacedName, windowInSeconds time.Duration) error
 }
@@ -223,7 +223,7 @@ func (c *MetricCollector) StableAndPanicRPS(key types.NamespacedName, now time.T
 		nil
 }
 
-func (c *MetricCollector) ResponseTimeEstimate(key types.NamespacedName, now time.Time) (float64, error) {
+func (c *MetricCollector) ProcessedRequestsEstimate(key types.NamespacedName, now time.Time) (float64, error) {
 	c.collectionsMutex.RLock()
 	defer c.collectionsMutex.RUnlock()
 
@@ -235,8 +235,8 @@ func (c *MetricCollector) ResponseTimeEstimate(key types.NamespacedName, now tim
 	if collection.responseTimeBuckets.IsEmpty(now) && collection.currentMetric().Spec.ScrapeTarget != "" {
 		return 0, ErrNoData
 	}
-	return collection.responseTimeBuckets.WindowAverage(now),
-		nil
+	return 2 * collection.responseTimeBuckets.WindowAverage(now),
+		nil // multiply by 2 to get number of processed requests for 2 seconds
 }
 
 func (c *MetricCollector) ResizeConcurrencyWindow(key types.NamespacedName, windowInSeconds time.Duration) error {

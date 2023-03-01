@@ -371,7 +371,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		// multiply by 60 to get the number of invocations for that minute
 	}
 
-	processedRequests, err := a.metricClient.ResponseTimeEstimate(metricKey, now)
+	processedRequests, err := a.metricClient.ProcessedRequestsEstimate(metricKey, now)
 	logger.Infof("processed requests: %f", processedRequests)
 	if err != nil {
 		if err == metrics.ErrNoData {
