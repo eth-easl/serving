@@ -151,6 +151,7 @@ func (a *autoscaler) Update(deciderSpec *DeciderSpec) {
 // Scale is not thread safe in regards to panic state, but it's thread safe in
 // regards to acquiring the decider spec.
 func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult {
+	autoscalerStartTime := time.Now()
 	desugared := logger.Desugar()
 	debugEnabled := desugared.Core().Enabled(zapcore.DebugLevel)
 
@@ -330,6 +331,8 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 		)
 	}
 
+	autoscalerEndTime := time.Now().Sub(autoscalerStartTime)
+	logger.Infof("Autoscaler epoch time: %d milliseconds", autoscalerEndTime.Milliseconds())
 	return ScaleResult{
 		DesiredPodCount:     desiredPodCount,
 		ExcessBurstCapacity: int32(excessBCF),
@@ -457,7 +460,10 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		}
 		var prediction float64
 		if prevMinute < a.currentMinute {
+			fftStart := time.Now()
 			prediction = fourierExtrapolation(a.invocationsPerMinute, 30)
+			fftTime := time.Now().Sub(fftStart)
+			logger.Infof("fft computation took %d milliseconds", fftTime.Milliseconds())
 			a.previousPrediction = prediction
 		} else {
 			prediction = a.previousPrediction
