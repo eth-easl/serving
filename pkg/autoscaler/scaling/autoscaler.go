@@ -411,7 +411,9 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		a.previousReadyPodsCount = readyPodsCount
 		// previous ready pod count might be 0, but it's reasonable to assume we didn't have the current
 		// ready pod count for the entire 2 second period
-		capacity := processedRequests / averagePodCount
+		capacity := (processedRequests / 2) / averagePodCount
+		// processed requests is the number of requests processed in the last 2 seconds, so divide by 2 to get the
+		// average number processed per second
 		a.capacityEstimateWindow = append(a.capacityEstimateWindow, capacity)
 		if prevMinute < a.currentMinute {
 			if a.processedRequestsPerMinute[prevMinute] > 60 &&
