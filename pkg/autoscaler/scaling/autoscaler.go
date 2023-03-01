@@ -461,7 +461,9 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		var prediction float64
 		if prevMinute < a.currentMinute {
 			fftStart := time.Now()
-			prediction = fourierExtrapolation(a.invocationsPerMinute, 30)
+			invocationsWindow := a.invocationsPerMinute[len(a.invocationsPerMinute)-60 : len(a.invocationsPerMinute)]
+			// we only use fft on a window of the past 60 invocations per minute
+			prediction = fourierExtrapolation(invocationsWindow, 30)
 			fftTime := time.Now().Sub(fftStart)
 			logger.Infof("fft computation took %d milliseconds", fftTime.Milliseconds())
 			a.previousPrediction = prediction
