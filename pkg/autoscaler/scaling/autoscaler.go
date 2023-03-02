@@ -332,7 +332,7 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	}
 
 	autoscalerEndTime := time.Now().Sub(autoscalerStartTime)
-	logger.Infof("Autoscaler epoch time: %d milliseconds", autoscalerEndTime.Milliseconds())
+	logger.Infof("Autoscaler epoch time: %d nanoseconds", autoscalerEndTime.Nanoseconds())
 	return ScaleResult{
 		DesiredPodCount:     desiredPodCount,
 		ExcessBurstCapacity: int32(excessBCF),
@@ -465,7 +465,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 			// we only use fft on a window of the past 60 invocations per minute
 			prediction = fourierExtrapolation(invocationsWindow, 30)
 			fftTime := time.Now().Sub(fftStart)
-			logger.Infof("fft computation took %d milliseconds", fftTime.Milliseconds())
+			logger.Infof("fft computation took %d nanoseconds", fftTime.Nanoseconds())
 			a.previousPrediction = prediction
 		} else {
 			prediction = a.previousPrediction
