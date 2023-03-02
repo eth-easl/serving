@@ -470,7 +470,9 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		} else {
 			prediction = a.previousPrediction
 		}
-		desiredPredictedScale := (1 / a.averageCapacity) * prediction / 60
+		maxPredictedScale := math.Max(10, 10*observedConcurrency)
+		// maximum predicted scale that we allow, to account for situations where the capacity is vastly underestimated
+		desiredPredictedScale := math.Max((1/a.averageCapacity)*prediction/60, maxPredictedScale)
 		if a.stability > 1 {
 			desiredScale = math.Ceil(math.Max(observedConcurrency, desiredPredictedScale))
 			logger.Infof("Stability: %f observed concurrency: %f predicted scale: %f",
