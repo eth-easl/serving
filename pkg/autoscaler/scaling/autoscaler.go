@@ -472,12 +472,12 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		}
 		maxPredictedScale := math.Max(10, 10*observedConcurrency)
 		// maximum predicted scale that we allow, to account for situations where the capacity is vastly underestimated
-		desiredPredictedScale := math.Max((1/a.averageCapacity)*prediction/60, maxPredictedScale)
+		desiredPredictedScale := math.Min((1/a.averageCapacity)*prediction/60, maxPredictedScale)
 		if a.stability > 1 {
 			desiredScale = math.Ceil(math.Max(observedConcurrency, desiredPredictedScale))
 			logger.Infof("Stability: %f observed concurrency: %f predicted scale: %f",
 				a.stability, observedConcurrency, desiredPredictedScale)
-		} else if prediction >= 1 {
+		} else if prediction <= 1 {
 			desiredScale = math.Ceil(math.Max(observedConcurrency, 1))
 			logger.Infof("Stability: %f observed concurrency: %f prediction: 1",
 				a.stability, observedConcurrency)
@@ -495,17 +495,17 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.Su
 	variance, mean := ComputeVariance(a.invocationsPerMinute)
 	var windowInSeconds time.Duration
 	if variance == 0 || mean == 0 {
-		windowInSeconds = 60 * time.Second
+		windowInSeconds = time.Duration(60 * float64(time.Second))
 	} else {
 		std := math.Sqrt(variance)
 		windowInSeconds = time.Duration((math.Round(20 * mean / std)) * float64(time.Second))
 	}
-	if windowInSeconds > 600 {
+	if windowInSeconds > time.Duration(600*float64(time.Second)) {
 		// maximum window size should be 10 minutes (600 seconds)
-		windowInSeconds = 600 * time.Second
-	} else if windowInSeconds < 20 {
+		windowInSeconds = time.Duration(600 * float64(time.Second))
+	} else if windowInSeconds < time.Duration(20*float64(time.Second)) {
 		// less than 20 seconds is too noisy
-		windowInSeconds = 20 * time.Second
+		windowInSeconds = time.Duration(20 * float64(time.Second))
 	}
 	logger.Infof("Setting window size to %f seconds", windowInSeconds.Seconds())
 	err := a.metricClient.ResizeConcurrencyWindow(metricKey, windowInSeconds)
