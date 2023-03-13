@@ -404,6 +404,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 			// -1 is interpreted as invalid scale
 		}
 	}
+	predictionMinute := int((now.Sub(a.startTime) + time.Duration(4*float64(time.Second))).Minutes())
 	var desiredScale float64
 	if a.currentMinute < 60 {
 		desiredScale = math.Ceil(observedConcurrency)
@@ -459,7 +460,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 			}
 		}
 		var prediction float64
-		if prevMinute < a.currentMinute {
+		if a.currentMinute < predictionMinute {
 			fftStart := time.Now()
 			invocationsWindow := a.invocationsPerMinute[len(a.invocationsPerMinute)-60 : len(a.invocationsPerMinute)]
 			// we only use fft on a window of the past 60 invocations per minute
