@@ -478,10 +478,10 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 			desiredScale = math.Ceil(math.Max(observedConcurrency, desiredPredictedScale))
 			logger.Infof("Stability: %f observed concurrency: %f predicted scale: %f",
 				a.stability, observedConcurrency, desiredPredictedScale)
-		} else if prediction <= 1 {
+		} else if prediction >= 1 {
 			desiredScale = math.Ceil(math.Max(observedConcurrency, 1))
-			logger.Infof("Stability: %f observed concurrency: %f prediction: 1",
-				a.stability, observedConcurrency)
+			logger.Infof("Stability: %f observed concurrency: %f prediction: %f",
+				a.stability, observedConcurrency, prediction)
 		} else {
 			desiredScale = math.Ceil(observedConcurrency)
 			logger.Infof("Stability: %f observed concurrency: %f",
