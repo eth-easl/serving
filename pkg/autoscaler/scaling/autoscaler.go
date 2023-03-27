@@ -351,12 +351,12 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 	if a.startTime.IsZero() {
 		a.startTime = now
 		a.currentMinute = 0
-		logger.Infof("current minute is 0")
+		logger.Debugf("current minute is 0")
 
 	}
 	prevMinute := a.currentMinute
 	a.currentMinute = int(now.Sub(a.startTime).Minutes())
-	logger.Infof("current minute: %d", a.currentMinute)
+	logger.Debugf("current minute: %d", a.currentMinute)
 
 	if prevMinute < a.currentMinute {
 		observedRps, _, err := a.metricClient.StableAndPanicRPS(metricKey, now)
@@ -375,7 +375,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 	}
 
 	processedRequests, err := a.metricClient.ProcessedRequestsEstimate(metricKey, now)
-	logger.Infof("processed requests: %f", processedRequests)
+	logger.Debugf("processed requests: %f", processedRequests)
 	if err != nil {
 		if err == metrics.ErrNoData {
 			logger.Debug("No requests processed yet")
@@ -436,13 +436,13 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 					a.averageCapacity = a.averageCapacity*0.8 + averagePrevMinute*0.2
 				}
 				a.pastAverageCapacityValues = append(a.pastAverageCapacityValues, averagePrevMinute)
-				logger.Infof("Average capacity previous minute %f average capacity %f",
+				logger.Debugf("Average capacity previous minute %f average capacity %f",
 					averagePrevMinute, a.averageCapacity)
 			} else {
 				a.capacityEstimateWindow = nil
 				// reset capacity estimate window
 			}
-			logger.Infof("Processed requests: %f invocations this minute: %f",
+			logger.Debugf("Processed requests: %f invocations this minute: %f",
 				a.processedRequestsPerMinute[prevMinute], a.invocationsPerMinute[prevMinute])
 		}
 
@@ -476,19 +476,19 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		desiredPredictedScale := math.Min((1/a.averageCapacity)*prediction/60, maxPredictedScale)
 		if a.stability > 1 {
 			desiredScale = math.Ceil(math.Max(observedConcurrency, desiredPredictedScale))
-			logger.Infof("Stability: %f observed concurrency: %f predicted scale: %f",
+			logger.Debugf("Stability: %f observed concurrency: %f predicted scale: %f",
 				a.stability, observedConcurrency, desiredPredictedScale)
 		} else if prediction >= 1 {
 			desiredScale = math.Ceil(math.Max(observedConcurrency, 1))
-			logger.Infof("Stability: %f observed concurrency: %f prediction: %f",
+			logger.Debugf("Stability: %f observed concurrency: %f prediction: %f",
 				a.stability, observedConcurrency, prediction)
 		} else {
 			desiredScale = math.Ceil(observedConcurrency)
-			logger.Infof("Stability: %f observed concurrency: %f",
+			logger.Debugf("Stability: %f observed concurrency: %f",
 				a.stability, observedConcurrency)
 		}
 	}
-	logger.Infof("Desired scale is %f", desiredScale)
+	logger.Debugf("Desired scale is %f", desiredScale)
 	return math.Ceil(desiredScale)
 }
 
