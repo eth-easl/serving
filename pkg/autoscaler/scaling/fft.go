@@ -2,6 +2,7 @@ package scaling
 
 import (
 	"github.com/mjibson/go-dsp/fft"
+	"github.com/openacid/slimarray/polyfit"
 	"golang.org/x/exp/slices"
 	"math"
 	"math/cmplx"
@@ -15,7 +16,7 @@ func fourierExtrapolation(xFloats []float64, harmonics int) float64 {
 	for i := 0; i < n; i++ {
 		t = append(t, float64(i))
 	}
-	f := NewFit(t, xFloats, 1)
+	f := polyfit.NewFit(t, xFloats, 1)
 	p := f.Solve()
 	var xNotrend []float64
 	for i := 0; i < n; i++ {
