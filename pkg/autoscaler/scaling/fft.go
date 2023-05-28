@@ -2,7 +2,6 @@ package scaling
 
 import (
 	"github.com/mjibson/go-dsp/fft"
-	. "github.com/openacid/slimarray/polyfit"
 	"golang.org/x/exp/slices"
 	"math"
 	"math/cmplx"
@@ -45,6 +44,10 @@ func fourierExtrapolation(xFloats []float64, harmonics int) float64 {
 
 func ComputeVariance(x []float64) (float64, float64) {
 	signalLength := len(x)
+	if signalLength == 0 {
+		// return negative variance to show that the result is unusable
+		return -1, -1
+	}
 	sum := 0.0
 	sumSquared := 0.0
 	for i := 0; i < signalLength; i++ {
