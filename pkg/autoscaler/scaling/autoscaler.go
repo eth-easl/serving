@@ -472,14 +472,12 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 		} else {
 			prediction = a.previousPrediction
 		}
-		maxPredictedScale := math.Max(10, 10*observedConcurrency)
-		// maximum predicted scale that we allow, to account for situations where the capacity is vastly underestimated
 
 		// compute how much until the minute is over:
 		timeLeft := float64(a.currentMinute+1) - timeInMinutesFloat
 		// compute predicted invocations until the end of the minute:
 		invocationsLeft := prediction * timeLeft
-		maxPredictedScale = math.Max(maxPredictedScale, invocationsLeft+observedConcurrency)
+		maxPredictedScale := invocationsLeft + observedConcurrency
 		// do not scale to more than the current concurrency + total number of predicted invocations until the end of the minute
 
 		desiredPredictedScale := math.Min((1/a.averageCapacity)*prediction/60, maxPredictedScale)
