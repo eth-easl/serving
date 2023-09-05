@@ -126,12 +126,14 @@ func NewConcurrencyEndpoint(e, m string) *ConcurrencyEndpoint {
 // Pause freezes a container, retrying until either successful or a timeout is
 // reached, at which point the container is killed
 func (c *ConcurrencyEndpoint) Pause(logger *zap.SugaredLogger) {
+	logger.Info("container %s is paused", c.Endpoint())
 	retryRequest(logger, c.Request, "pause")
 }
 
 // Resume thaws a container, retrying until either successful or a timeout is
 // reached, at which point the container is killed
 func (c *ConcurrencyEndpoint) Resume(logger *zap.SugaredLogger) {
+	logger.Info("container %s is resumed", c.Endpoint())
 	retryRequest(logger, c.Request, "resume")
 }
 

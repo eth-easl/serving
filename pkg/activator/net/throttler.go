@@ -233,6 +233,7 @@ func (rt *revisionThrottler) try(ctx context.Context, function func(string) erro
 			defer cb()
 			// We already reserved a guaranteed spot. So just execute the passed functor.
 			ret = function(tracker.dest)
+			rt.logger.Infof("chosen request destination is %s", tracker.dest)
 		}); err != nil {
 			return err
 		}
