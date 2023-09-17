@@ -405,7 +405,7 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 			// -1 is interpreted as invalid scale
 		}
 	}
-	predictionMinute := int((now.Sub(a.startTime) + time.Duration(4*float64(time.Second))).Minutes())
+	predictionMinute := int((now.Sub(a.startTime) + time.Duration(30*float64(time.Second))).Minutes())
 	var desiredScale float64
 	if a.currentMinute < 60 {
 		desiredScale = math.Ceil(observedConcurrency)
@@ -494,6 +494,10 @@ func (a *autoscaler) hybridScaling(readyPodsCount float64, metricKey types.Names
 			logger.Debugf("Stability: %f observed concurrency: %f",
 				a.stability, observedConcurrency)
 		}
+	}
+	difference := desiredScale - readyPodsCount
+	if difference > 3 {
+		desiredScale = readyPodsCount + 2
 	}
 	logger.Debugf("Desired scale is %f", desiredScale)
 	return math.Ceil(desiredScale)
