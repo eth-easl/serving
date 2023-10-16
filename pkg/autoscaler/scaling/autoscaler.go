@@ -18,9 +18,12 @@ package scaling
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math"
+	"os"
 	"sync"
 	"time"
 
@@ -73,6 +76,9 @@ type autoscaler struct {
 	previousPrediction         float64
 	pastAverageCapacityValues  []float64
 	stability                  float64
+
+	// oracle
+	scale []int
 }
 
 // New creates a new instance of default autoscaler implementation.
@@ -155,7 +161,7 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	desugared := logger.Desugar()
 	debugEnabled := desugared.Core().Enabled(zapcore.DebugLevel)
 
-	logger.Infof("oracle %s %s", a.namespace, a.revision)
+	logger.Infof("oracle for function %s", a.revision)
 	spec := a.currentSpec()
 	originalReadyPodsCount, err := a.podCounter.ReadyCount()
 	// If the error is NotFound, then presume 0.
@@ -179,6 +185,8 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 		if dspc == -1 {
 			return invalidSR
 		}
+	case autoscaling.Oracle:
+		dspc = a.oracleScaling(readyPodsCount, metricKey, now, logger)
 	default:
 		metricName = autoscaling.Concurrency // concurrency is used by default
 		observedStableValue, observedPanicValue, err = a.metricClient.StableAndPanicConcurrency(metricKey, now)
@@ -523,4 +531,15 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.Su
 	logger.Infof("Setting window size to %f seconds", windowInSeconds.Seconds())
 	err := a.metricClient.ResizeConcurrencyWindow(metricKey, windowInSeconds)
 	return err
+}
+
+func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.NamespacedName,
+	now time.Time, logger *zap.SugaredLogger) float64 {
+	jsonFile, err := os.Open(a.revision + "/scale.json")
+	if err != nil {
+		logger.Infof("Couldn't open file: %s", err)
+	}
+	jsonStr, _ := ioutil.ReadAll(jsonFile)
+	json.Unmarshal([]byte(jsonStr), &a.scale)
+	return float64(a.scale[22])
 }

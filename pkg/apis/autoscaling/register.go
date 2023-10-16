@@ -73,6 +73,8 @@ const (
 	RPS = "rps"
 	// Hybrid policy uses multiple metrics
 	Hybrid = "hybrid"
+	// oracle policy uses scale that is computed offline
+	Oracle = "oracle"
 
 	// TargetAnnotationKey is the annotation to specify what metric value the
 	// PodAutoscaler should attempt to maintain. For example,
