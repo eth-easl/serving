@@ -163,10 +163,10 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 
 	files, err := ioutil.ReadDir("/users")
 	if err != nil {
-		logger.Info(err)
+		logger.Infof("couldn't list files: %s", err)
 	}
 	for _, file := range files {
-		logger.Info(file.Name(), file.IsDir())
+		logger.Info("oracle listing files %s", file.Name())
 	}
 	spec := a.currentSpec()
 	originalReadyPodsCount, err := a.podCounter.ReadyCount()
@@ -541,7 +541,7 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.Su
 
 func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.NamespacedName,
 	now time.Time, logger *zap.SugaredLogger) float64 {
-	jsonFile, err := os.Open("/users/Mihajlo/" + a.revision + "/scale.json")
+	jsonFile, err := os.Open("/users/Mihajlo/loader/scale_per_function/" + a.revision + "/scale.json")
 	if err != nil {
 		logger.Infof("Couldn't open file: %s", err)
 	}
