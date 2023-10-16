@@ -155,6 +155,7 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	desugared := logger.Desugar()
 	debugEnabled := desugared.Core().Enabled(zapcore.DebugLevel)
 
+	logger.Infof("oracle %s %s", a.namespace, a.revision)
 	spec := a.currentSpec()
 	originalReadyPodsCount, err := a.podCounter.ReadyCount()
 	// If the error is NotFound, then presume 0.
