@@ -161,7 +161,11 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	desugared := logger.Desugar()
 	debugEnabled := desugared.Core().Enabled(zapcore.DebugLevel)
 
-	logger.Infof("oracle for function %s", a.revision)
+	path, err := os.Getwd()
+	if err != nil {
+		logger.Infof("failed getting cwd %s", err)
+	}
+	logger.Infof("oracle for function %s at path %s", a.revision, path)
 	spec := a.currentSpec()
 	originalReadyPodsCount, err := a.podCounter.ReadyCount()
 	// If the error is NotFound, then presume 0.
