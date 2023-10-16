@@ -161,11 +161,13 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	desugared := logger.Desugar()
 	debugEnabled := desugared.Core().Enabled(zapcore.DebugLevel)
 
-	path, err := os.Getwd()
+	files, err := ioutil.ReadDir("/users")
 	if err != nil {
-		logger.Infof("failed getting cwd %s", err)
+		logger.Info(err)
 	}
-	logger.Infof("oracle for function %s at path %s", a.revision, path)
+	for _, file := range files {
+		logger.Info(file.Name(), file.IsDir())
+	}
 	spec := a.currentSpec()
 	originalReadyPodsCount, err := a.podCounter.ReadyCount()
 	// If the error is NotFound, then presume 0.
@@ -539,7 +541,7 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.Su
 
 func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.NamespacedName,
 	now time.Time, logger *zap.SugaredLogger) float64 {
-	jsonFile, err := os.Open(a.revision + "/scale.json")
+	jsonFile, err := os.Open("/users/Mihajlo/" + a.revision + "/scale.json")
 	if err != nil {
 		logger.Infof("Couldn't open file: %s", err)
 	}
