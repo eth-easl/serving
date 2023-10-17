@@ -162,14 +162,14 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	desugared := logger.Desugar()
 	debugEnabled := desugared.Core().Enabled(zapcore.DebugLevel)
 
-	files, err := ioutil.ReadDir("/var/log/")
+	files, err := ioutil.ReadDir("/")
 	if err != nil {
 		logger.Infof("couldn't list files: %s", err)
 	}
 	for _, file := range files {
 		logger.Info("oracle listing files %s", file.Name())
 	}
-	files, err = ioutil.ReadDir("/var/log/scale_per_function/")
+	files, err = ioutil.ReadDir("/logs/")
 	if err != nil {
 		logger.Infof("couldn't list files: %s", err)
 	}
