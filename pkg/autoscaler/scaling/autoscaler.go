@@ -551,7 +551,7 @@ func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.Names
 	now time.Time, logger *zap.SugaredLogger) float64 {
 	funcName := strings.Split(a.revision, "-")
 	fName := funcName[0] + funcName[1] + funcName[2]
-	jsonFile, err := os.Open("/var/log/scale_per_function/" + fName + "/scale.json")
+	jsonFile, err := os.Open("/home/nonroot/scale_per_function/" + fName + "/scale.json")
 	if err != nil {
 		logger.Infof("Couldn't open file: %s", err)
 	} else {
