@@ -161,7 +161,7 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	desugared := logger.Desugar()
 	debugEnabled := desugared.Core().Enabled(zapcore.DebugLevel)
 
-	files, err := ioutil.ReadDir("/")
+	files, err := ioutil.ReadDir("/home/")
 	if err != nil {
 		logger.Infof("couldn't list files: %s", err)
 	}
@@ -541,7 +541,7 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.Su
 
 func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.NamespacedName,
 	now time.Time, logger *zap.SugaredLogger) float64 {
-	jsonFile, err := os.Open("/users/Mihajlo/loader/scale_per_function/" + a.revision + "/scale.json")
+	jsonFile, err := os.Open("/var/log/scale_per_function/" + a.revision + "/scale.json")
 	if err != nil {
 		logger.Infof("Couldn't open file: %s", err)
 	} else {
