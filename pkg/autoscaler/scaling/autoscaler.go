@@ -79,7 +79,8 @@ type autoscaler struct {
 	stability                  float64
 
 	// oracle
-	scale []int
+	scale        []int
+	epochCounter int
 }
 
 // New creates a new instance of default autoscaler implementation.
@@ -169,7 +170,7 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	for _, file := range files {
 		logger.Info("oracle listing files %s", file.Name())
 	}
-	files, err = ioutil.ReadDir("/logs/")
+	files, err = ioutil.ReadDir("/data/")
 	if err != nil {
 		logger.Infof("couldn't list files: %s", err)
 	}
@@ -551,12 +552,18 @@ func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.Names
 	now time.Time, logger *zap.SugaredLogger) float64 {
 	funcName := strings.Split(a.revision, "-")
 	fName := funcName[0] + funcName[1] + funcName[2]
-	jsonFile, err := os.Open("/home/nonroot/scale_per_function/" + fName + "/scale.json")
+	jsonFile, err := os.Open("/data/scale/scale_per_function/" + fName + "/scale.json")
 	if err != nil {
 		logger.Infof("Couldn't open file: %s", err)
 	} else {
 		jsonStr, _ := ioutil.ReadAll(jsonFile)
 		json.Unmarshal([]byte(jsonStr), &a.scale)
 	}
-	return 1.0
+	if a.epochCounter == len(a.scale) {
+		return 0.0
+	} else {
+		val := float64(a.scale[a.epochCounter])
+		a.epochCounter++
+		return val
+	}
 }
