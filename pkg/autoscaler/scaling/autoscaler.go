@@ -24,7 +24,6 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -163,20 +162,6 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	desugared := logger.Desugar()
 	debugEnabled := desugared.Core().Enabled(zapcore.DebugLevel)
 
-	files, err := ioutil.ReadDir("/var/")
-	if err != nil {
-		logger.Infof("couldn't list files: %s", err)
-	}
-	for _, file := range files {
-		logger.Info("oracle listing files in bin %s", file.Name())
-	}
-	files, err = ioutil.ReadDir("/var/scale_per_function")
-	if err != nil {
-		logger.Infof("couldn't list files: %s", err)
-	}
-	for _, file := range files {
-		logger.Info("oracle listing files in sbin %s", file.Name())
-	}
 	spec := a.currentSpec()
 	originalReadyPodsCount, err := a.podCounter.ReadyCount()
 	// If the error is NotFound, then presume 0.
@@ -550,14 +535,15 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.Su
 
 func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.NamespacedName,
 	now time.Time, logger *zap.SugaredLogger) float64 {
-	funcName := strings.Split(a.revision, "-")
-	fName := funcName[0] + funcName[1] + funcName[2]
-	jsonFile, err := os.Open("/var/scale_per_function/" + fName + "/scale.json")
-	if err != nil {
-		logger.Infof("Couldn't open file: %s", err)
-	} else {
-		jsonStr, _ := ioutil.ReadAll(jsonFile)
-		json.Unmarshal([]byte(jsonStr), &a.scale)
+	if len(a.scale) == 0 {
+		fName := a.revision
+		jsonFile, err := os.Open("/var/scale_per_function/" + fName + "/scale.json")
+		if err != nil {
+			logger.Infof("Couldn't open file: %s", err)
+		} else {
+			jsonStr, _ := ioutil.ReadAll(jsonFile)
+			json.Unmarshal([]byte(jsonStr), &a.scale)
+		}
 	}
 	if a.epochCounter == len(a.scale) {
 		return 0.0
