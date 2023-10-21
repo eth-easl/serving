@@ -342,6 +342,7 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 
 	autoscalerEndTime := time.Now().Sub(autoscalerStartTime)
 	logger.Infof("Autoscaler epoch time: %d nanoseconds", autoscalerEndTime.Nanoseconds())
+	logger.Infof("oracle desired pod count: %d", desiredPodCount)
 	return ScaleResult{
 		DesiredPodCount:     desiredPodCount,
 		ExcessBurstCapacity: int32(excessBCF),
@@ -535,6 +536,7 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.Su
 
 func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.NamespacedName,
 	now time.Time, logger *zap.SugaredLogger) float64 {
+	var val float64
 	if len(a.scale) == 0 {
 		fName := a.revision
 		jsonFile, err := os.Open("/var/scale_per_function/" + fName + "/scale.json")
@@ -546,10 +548,12 @@ func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.Names
 		}
 	}
 	if a.epochCounter == len(a.scale) {
-		return 0.0
+		val = 0.0
 	} else {
-		val := float64(a.scale[a.epochCounter])
+		val = float64(a.scale[a.epochCounter])
 		a.epochCounter++
-		return val
 	}
+	logger.Infof("oracle revision: %s, oracle time: %d, oracle desired scale: %f, oracle epoch counter: %d, oracle array length: %d",
+		a.revision, now.Unix(), val, a.epochCounter, len(a.scale))
+	return val
 }
