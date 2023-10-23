@@ -547,7 +547,7 @@ func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.Names
 			json.Unmarshal([]byte(jsonStr), &a.scale)
 		}
 	}
-	if now.Unix() < 1698062400 {
+	if now.Unix() < 1698084000 {
 		val = 0.0
 	} else if a.epochCounter == len(a.scale) {
 		val = 0.0
