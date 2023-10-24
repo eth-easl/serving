@@ -24,6 +24,8 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -537,6 +539,7 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.Su
 func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.NamespacedName,
 	now time.Time, logger *zap.SugaredLogger) float64 {
 	var val float64
+	var tInt64 int64
 	if len(a.scale) == 0 {
 		fName := a.revision
 		jsonFile, err := os.Open("/var/scale_per_function/" + fName + "/scale.json")
@@ -546,8 +549,18 @@ func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.Names
 			jsonStr, _ := ioutil.ReadAll(jsonFile)
 			json.Unmarshal([]byte(jsonStr), &a.scale)
 		}
+		file, err := os.ReadFile("/var/time.txt")
+		if err != nil {
+			logger.Infof("error when reading time.txt: %s", err)
+		}
+		t := string(file)
+		tInt, err := strconv.Atoi(strings.Split(t, "\n")[0])
+		if err != nil {
+			logger.Infof("error when converting time.txt to integer: %s", err)
+		}
+		tInt64 = int64(tInt)
 	}
-	if now.Unix() < 1698163200 {
+	if now.Unix() < tInt64 {
 		val = 0.0
 	} else if a.epochCounter == len(a.scale) {
 		val = 0.0
