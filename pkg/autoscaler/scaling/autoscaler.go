@@ -547,7 +547,7 @@ func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.Names
 			json.Unmarshal([]byte(jsonStr), &a.scale)
 		}
 	}
-	if now.Unix() < 1698143341 {
+	if now.Unix() < 1698163200 {
 		val = 0.0
 	} else if a.epochCounter == len(a.scale) {
 		val = 0.0
@@ -555,6 +555,15 @@ func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.Names
 		val = float64(a.scale[a.epochCounter])
 		a.epochCounter++
 	}
+	_, panicConc, err := a.metricClient.StableAndPanicConcurrency(metricKey, now)
+	if err == nil {
+		if panicConc > val && val > 0 {
+			val = math.Min(1.5*val, panicConc)
+		} else if val == 0 && panicConc > 0 {
+			val = panicConc
+		}
+	}
+
 	logger.Infof("oracle revision: %s, oracle time: %d, oracle desired scale: %f, oracle epoch counter: %d, oracle array length: %d",
 		a.revision, now.Unix(), val, a.epochCounter, len(a.scale))
 	return val
