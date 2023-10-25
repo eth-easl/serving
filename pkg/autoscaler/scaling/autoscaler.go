@@ -82,6 +82,7 @@ type autoscaler struct {
 	// oracle
 	scale        []int
 	epochCounter int
+	timeToWait   int64
 }
 
 // New creates a new instance of default autoscaler implementation.
@@ -539,7 +540,6 @@ func (a *autoscaler) resizeWindow(metricKey types.NamespacedName, logger *zap.Su
 func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.NamespacedName,
 	now time.Time, logger *zap.SugaredLogger) float64 {
 	var val float64
-	var tInt int64
 	if len(a.scale) == 0 {
 		fName := a.revision
 		jsonFile, err := os.Open("/var/scale_per_function/" + fName + "/scale.json")
@@ -554,21 +554,22 @@ func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.Names
 			logger.Infof("revision %s error when reading time.txt: %s", a.revision, err)
 		}
 		t := string(file)
-		tInt, err = strconv.ParseInt((strings.Split(t, "\n")[0]), 10, 64)
+		tInt, err := strconv.ParseInt((strings.Split(t, "\n")[0]), 10, 64)
 		if err != nil {
 			logger.Infof("error when converting time.txt to integer: %s", err)
 		}
 		logger.Infof("oracle revision: %s parsed time as %d", a.revision, tInt)
+		a.timeToWait = tInt
 	}
-	if now.Unix() < tInt {
-		logger.Infof("oracle revision: %s current time: %d waiting until: %d", a.revision, now.Unix(), tInt)
+	if now.Unix() < a.timeToWait {
+		logger.Infof("oracle revision: %s current time: %d waiting until: %d", a.revision, now.Unix(), a.timeToWait)
 		val = 0.0
 	} else if a.epochCounter == len(a.scale) {
 		logger.Infof("oracle revision: %s current time: %d length equal to epoch counter", a.revision, now.Unix())
 		val = 0.0
 	} else {
 		logger.Infof("oracle revision: %s current time: %d waiting until: %d is over, epoch counter: %d",
-			a.revision, now.Unix(), tInt, a.epochCounter)
+			a.revision, now.Unix(), a.timeToWait, a.epochCounter)
 		val = float64(a.scale[a.epochCounter])
 		a.epochCounter++
 	}
