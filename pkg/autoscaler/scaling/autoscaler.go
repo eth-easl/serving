@@ -558,8 +558,10 @@ func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.Names
 		if err != nil {
 			logger.Infof("error when converting time.txt to integer: %s", err)
 		}
+		logger.Infof("oracle parsed time as %d", tInt)
 	}
 	if now.Unix() < tInt {
+		logger.Info("oracle current time %d waiting until %d", now.Unix(), tInt)
 		val = 0.0
 	} else if a.epochCounter == len(a.scale) {
 		val = 0.0
