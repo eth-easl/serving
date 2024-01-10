@@ -18,9 +18,14 @@ package scaling
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +65,11 @@ type autoscaler struct {
 	// specMux guards the current DeciderSpec.
 	specMux     sync.RWMutex
 	deciderSpec *DeciderSpec
+
+	// oracle
+	scale        []int
+	epochCounter int
+	timeToWait   int64
 }
 
 // New creates a new instance of default autoscaler implementation.
@@ -155,9 +165,12 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 
 	metricName := spec.ScalingMetric
 	var observedStableValue, observedPanicValue float64
+	var dspc, dppc float64
 	switch spec.ScalingMetric {
 	case autoscaling.RPS:
 		observedStableValue, observedPanicValue, err = a.metricClient.StableAndPanicRPS(metricKey, now)
+	case autoscaling.Oracle:
+		dspc = a.oracleScaling(readyPodsCount, metricKey, now, logger)
 	default:
 		metricName = autoscaling.Concurrency // concurrency is used by default
 		observedStableValue, observedPanicValue, err = a.metricClient.StableAndPanicConcurrency(metricKey, now)
@@ -183,17 +196,17 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 	if spec.Reachable {
 		maxScaleDown = math.Floor(readyPodsCount / spec.MaxScaleDownRate)
 	}
-
-	dspc := math.Ceil(observedStableValue / spec.TargetValue)
-	dppc := math.Ceil(observedPanicValue / spec.TargetValue)
-	if debugEnabled {
-		desugared.Debug(
-			fmt.Sprintf("For metric %s observed values: stable = %0.3f; panic = %0.3f; target = %0.3f "+
-				"Desired StablePodCount = %0.0f, PanicPodCount = %0.0f, ReadyEndpointCount = %d, MaxScaleUp = %0.0f, MaxScaleDown = %0.0f",
-				metricName, observedStableValue, observedPanicValue, spec.TargetValue,
-				dspc, dppc, originalReadyPodsCount, maxScaleUp, maxScaleDown))
+	if spec.ScalingMetric == autoscaling.Concurrency || spec.ScalingMetric == autoscaling.RPS {
+		dspc = math.Ceil(observedStableValue / spec.TargetValue)
+		dppc = math.Ceil(observedPanicValue / spec.TargetValue)
+		if debugEnabled {
+			desugared.Debug(
+				fmt.Sprintf("For metric %s observed values: stable = %0.3f; panic = %0.3f; target = %0.3f "+
+					"Desired StablePodCount = %0.0f, PanicPodCount = %0.0f, ReadyEndpointCount = %d, MaxScaleUp = %0.0f, MaxScaleDown = %0.0f",
+					metricName, observedStableValue, observedPanicValue, spec.TargetValue,
+					dspc, dppc, originalReadyPodsCount, maxScaleUp, maxScaleDown))
+		}
 	}
-
 	// We want to keep desired pod count in the  [maxScaleDown, maxScaleUp] range.
 	desiredStablePodCount := int32(math.Min(math.Max(dspc, maxScaleDown), maxScaleUp))
 	desiredPanicPodCount := int32(math.Min(math.Max(dppc, maxScaleDown), maxScaleUp))
@@ -207,46 +220,46 @@ func (a *autoscaler) Scale(logger *zap.SugaredLogger, now time.Time) ScaleResult
 			desiredPanicPodCount = a.deciderSpec.ActivationScale
 		}
 	}
-
-	isOverPanicThreshold := dppc/readyPodsCount >= spec.PanicThreshold
-
-	if a.panicTime.IsZero() && isOverPanicThreshold {
-		// Begin panicking when we cross the threshold in the panic window.
-		logger.Info("PANICKING.")
-		a.panicTime = now
-		pkgmetrics.Record(a.reporterCtx, panicM.M(1))
-	} else if isOverPanicThreshold {
-		// If we're still over panic threshold right now — extend the panic window.
-		a.panicTime = now
-	} else if !a.panicTime.IsZero() && !isOverPanicThreshold && a.panicTime.Add(spec.StableWindow).Before(now) {
-		// Stop panicking after the surge has made its way into the stable metric.
-		logger.Info("Un-panicking.")
-		a.panicTime = time.Time{}
-		a.maxPanicPods = 0
-		pkgmetrics.Record(a.reporterCtx, panicM.M(0))
-	}
-
 	desiredPodCount := desiredStablePodCount
-	if !a.panicTime.IsZero() {
-		// In some edgecases stable window metric might be larger
-		// than panic one. And we should provision for stable as for panic,
-		// so pick the larger of the two.
-		if desiredPodCount < desiredPanicPodCount {
-			desiredPodCount = desiredPanicPodCount
-		}
-		logger.Debug("Operating in panic mode.")
-		// We do not scale down while in panic mode. Only increases will be applied.
-		if desiredPodCount > a.maxPanicPods {
-			logger.Infof("Increasing pods count from %d to %d.", originalReadyPodsCount, desiredPodCount)
-			a.maxPanicPods = desiredPodCount
-		} else if desiredPodCount < a.maxPanicPods {
-			logger.Infof("Skipping pod count decrease from %d to %d.", a.maxPanicPods, desiredPodCount)
-		}
-		desiredPodCount = a.maxPanicPods
-	} else {
-		logger.Debug("Operating in stable mode.")
-	}
+	if spec.ScalingMetric == autoscaling.Concurrency || spec.ScalingMetric == autoscaling.RPS {
+		isOverPanicThreshold := dppc/readyPodsCount >= spec.PanicThreshold
 
+		if a.panicTime.IsZero() && isOverPanicThreshold {
+			// Begin panicking when we cross the threshold in the panic window.
+			logger.Info("PANICKING.")
+			a.panicTime = now
+			pkgmetrics.Record(a.reporterCtx, panicM.M(1))
+		} else if isOverPanicThreshold {
+			// If we're still over panic threshold right now — extend the panic window.
+			a.panicTime = now
+		} else if !a.panicTime.IsZero() && !isOverPanicThreshold && a.panicTime.Add(spec.StableWindow).Before(now) {
+			// Stop panicking after the surge has made its way into the stable metric.
+			logger.Info("Un-panicking.")
+			a.panicTime = time.Time{}
+			a.maxPanicPods = 0
+			pkgmetrics.Record(a.reporterCtx, panicM.M(0))
+		}
+
+		if !a.panicTime.IsZero() {
+			// In some edgecases stable window metric might be larger
+			// than panic one. And we should provision for stable as for panic,
+			// so pick the larger of the two.
+			if desiredPodCount < desiredPanicPodCount {
+				desiredPodCount = desiredPanicPodCount
+			}
+			logger.Debug("Operating in panic mode.")
+			// We do not scale down while in panic mode. Only increases will be applied.
+			if desiredPodCount > a.maxPanicPods {
+				logger.Infof("Increasing pods count from %d to %d.", originalReadyPodsCount, desiredPodCount)
+				a.maxPanicPods = desiredPodCount
+			} else if desiredPodCount < a.maxPanicPods {
+				logger.Infof("Skipping pod count decrease from %d to %d.", a.maxPanicPods, desiredPodCount)
+			}
+			desiredPodCount = a.maxPanicPods
+		} else {
+			logger.Debug("Operating in stable mode.")
+		}
+	}
 	// Delay scale down decisions, if a ScaleDownDelay was specified.
 	// We only do this if there's a non-nil delayWindow because although a
 	// one-element delay window is _almost_ the same as no delay at all, it is
@@ -318,4 +331,46 @@ func (a *autoscaler) currentSpec() *DeciderSpec {
 	a.specMux.RLock()
 	defer a.specMux.RUnlock()
 	return a.deciderSpec
+}
+
+func (a *autoscaler) oracleScaling(readyPodsCount float64, metricKey types.NamespacedName,
+	now time.Time, logger *zap.SugaredLogger) float64 {
+	var val float64
+	if len(a.scale) == 0 {
+		fName := a.revision
+		jsonFile, err := os.Open("/var/scale_per_function/" + fName + "/scale.json")
+		if err != nil {
+			logger.Infof("Couldn't open file: %s", err)
+		} else {
+			jsonStr, _ := ioutil.ReadAll(jsonFile)
+			json.Unmarshal([]byte(jsonStr), &a.scale)
+		}
+		file, err := os.ReadFile("/var/time.txt")
+		if err != nil {
+			logger.Infof("revision %s error when reading time.txt: %s", a.revision, err)
+		}
+		t := string(file)
+		tInt, err := strconv.ParseInt((strings.Split(t, "\n")[0]), 10, 64)
+		if err != nil {
+			logger.Infof("error when converting time.txt to integer: %s", err)
+		}
+		logger.Infof("oracle revision: %s parsed time as %d", a.revision, tInt)
+		a.timeToWait = tInt
+	}
+	if now.Unix() < a.timeToWait {
+		logger.Infof("oracle revision: %s current time: %d waiting until: %d", a.revision, now.Unix(), a.timeToWait)
+		val = 0.0
+	} else if a.epochCounter == len(a.scale) {
+		logger.Infof("oracle revision: %s current time: %d length equal to epoch counter", a.revision, now.Unix())
+		val = 0.0
+	} else {
+		logger.Infof("oracle revision: %s current time: %d waiting until: %d is over, epoch counter: %d",
+			a.revision, now.Unix(), a.timeToWait, a.epochCounter)
+		val = float64(a.scale[a.epochCounter])
+		a.epochCounter++
+	}
+
+	logger.Infof("oracle revision: %s, oracle time: %d, oracle desired scale: %f, oracle epoch counter: %d, oracle array length: %d",
+		a.revision, now.Unix(), val, a.epochCounter, len(a.scale))
+	return val
 }

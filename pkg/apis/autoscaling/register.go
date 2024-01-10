@@ -71,6 +71,8 @@ const (
 	Memory = "memory"
 	// RPS is the requests per second reaching the Pod.
 	RPS = "rps"
+	// oracle policy uses scale that is computed offline
+	Oracle = "oracle"
 
 	// TargetAnnotationKey is the annotation to specify what metric value the
 	// PodAutoscaler should attempt to maintain. For example,
